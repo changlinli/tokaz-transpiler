@@ -189,19 +189,13 @@ fn hex_color(input: &str) -> IResult<&str, Color> {
 struct Args {
     /// Name of the person to greet
     #[arg(short, long)]
-    name: String,
-
-    /// Number of times to greet
-    #[arg(short, long, default_value_t = 1)]
-    count: u8,
+    input_file_name: String,
 }
 
 fn main() {
     let args = Args::parse();
 
-    for _ in 0..args.count {
-        println!("Hello {}!", args.name)
-    }
+    println!("{}!", args.input_file_name)
 }
 
 #[test]
