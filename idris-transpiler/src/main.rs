@@ -3,8 +3,10 @@ use std::{env, fs};
 use clap::Arg;
 use clap::Parser;
 use nom::{bytes::complete::{tag, take_while_m_n}, combinator::map_res, sequence::Tuple, IResult, InputTake, FindSubstring, InputLength};
+use nom::branch::alt;
 use nom::bytes::complete::{take_until, take_while};
 use nom::character::complete::multispace0;
+use nom::combinator::map;
 use nom::error::ParseError;
 use crate::AST::{App, IntegerLiteral};
 
@@ -123,11 +125,13 @@ fn parse_function(input: &str) -> IResult<&str, Function> {
 }
 
 fn parse_ast(input: &str) -> IResult<&str, AST> {
-    let (input, function) = parse_function(input)?;
+    let parse_as_function_ast = map(parse_function, (|x| AST::FunctionAST(x)));
+    let parse_val_binding_ast = map(parse_val_binding, AST::TopLevelValBinding);
+    let (input, ast) = alt((parse_as_function_ast, parse_val_binding_ast))(input)?;
     Ok(
         (
             input,
-            AST::FunctionAST(function),
+            ast,
         )
     )
 }
@@ -195,7 +199,10 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    println!("{}!", args.input_file_name)
+    match fs::read_to_string(&args.input_file_name) {
+        Ok(contents) => println!("{}", transform_to_idris(&contents).unwrap().1),
+        Err(err) => println!("Error reading file: {}", err),
+    }
 }
 
 #[test]
