@@ -1,0 +1,7 @@
+val myValue: Integer = 5
+
+function identity(t: Type, x: t): t {
+    x
+}
+
+val anotherCopyOfMyValue: Integer = identity(Integer, myValue)
