@@ -7,7 +7,7 @@ use nom::branch::alt;
 use nom::bytes::complete::{take_until, take_while};
 use nom::character::complete::multispace0;
 use nom::combinator::map;
-use nom::error::ParseError;
+use nom::error::{Error, ErrorKind, ParseError};
 use crate::AST::{App, IntegerLiteral};
 
 #[derive(Debug, PartialEq)]
@@ -65,7 +65,7 @@ pub struct ExpressionBlock {
 pub enum AST {
     App(FunctionApplication),
     AppArg(Box<str>),
-    TopLevelValBinding(ValBinding),
+    ValBindingAST(ValBinding),
     FunctionAST(Function),
     IntegerLiteral(i128),
     Empty,
@@ -95,6 +95,58 @@ fn parse_val_binding(input: &str) -> IResult<&str, ValBinding> {
     )
 }
 
+pub fn take_until_unbalanced(
+    opening_bracket: char,
+    closing_bracket: char,
+) -> impl Fn(&str) -> IResult<&str, &str> {
+    move |i: &str| {
+        let mut index = 0;
+        let mut bracket_counter = 0;
+        while let Some(n) = &i[index..].find(&[opening_bracket, closing_bracket, '\\'][..]) {
+            index += n;
+            let mut it = i[index..].chars();
+            match it.next().unwrap_or_default() {
+                c if c == '\\' => {
+                    // Skip the escape char `\`.
+                    index += '\\'.len_utf8();
+                    // Skip also the following char.
+                    let c = it.next().unwrap_or_default();
+                    index += c.len_utf8();
+                }
+                c if c == opening_bracket => {
+                    bracket_counter += 1;
+                    index += opening_bracket.len_utf8();
+                }
+                c if c == closing_bracket => {
+                    // Closing bracket.
+                    bracket_counter -= 1;
+                    index += closing_bracket.len_utf8();
+                }
+                // Can not happen.
+                _ => unreachable!(),
+            };
+            // We found the unmatched closing bracket.
+            if bracket_counter == -1 {
+                // We do not consume it.
+                index -= closing_bracket.len_utf8();
+                return Ok((&i[index..], &i[0..index]));
+            };
+        }
+
+        if bracket_counter == 0 {
+            Ok(("", i))
+        } else {
+            Err(Err::Error(Error::from_error_kind(i, ErrorKind::TakeUntil)))
+        }
+    }
+}
+
+fn parse_expression_block(input: &str) -> IResult<&str, ExpressionBlock> {
+    let parse_as_function_ast = map(parse_function, (|x| AST::FunctionAST(x)));
+    let parse_val_binding_ast = map(parse_val_binding, AST::ValBindingAST);
+    let parsers = (parse_as_function_ast, parse_val_binding_ast);
+}
+
 fn parse_function(input: &str) -> IResult<&str, Function> {
     let (input, _) = tag("function")(input)?;
     let (input, _) = multispace0(input)?;
@@ -109,8 +161,8 @@ fn parse_function(input: &str) -> IResult<&str, Function> {
     let (input, _) = multispace0(input)?;
     let (input, return_type) = take_until(" ")(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, _) = tag("{")(input)?;
-    let (input, _) = tag("}")(input)?;
+    let (input, result) = take_until_unbalanced('{', '}')(input);
+    let (input, stuff_in_brackets) = parse_ast(result)?;
     Ok(
         (
             input,
@@ -118,7 +170,7 @@ fn parse_function(input: &str) -> IResult<&str, Function> {
                 name: name.to_string().into_boxed_str(),
                 args: Box::new([]),
                 return_type: return_type.to_string().into_boxed_str(),
-                body: Box::new(AST::Empty),
+                body: Box::new(stuff_in_brackets),
             },
         )
     )
@@ -126,8 +178,9 @@ fn parse_function(input: &str) -> IResult<&str, Function> {
 
 fn parse_ast(input: &str) -> IResult<&str, AST> {
     let parse_as_function_ast = map(parse_function, (|x| AST::FunctionAST(x)));
-    let parse_val_binding_ast = map(parse_val_binding, AST::TopLevelValBinding);
-    let (input, ast) = alt((parse_as_function_ast, parse_val_binding_ast))(input)?;
+    let parse_val_binding_ast = map(parse_val_binding, AST::ValBindingAST);
+    let all_parsers = (parse_as_function_ast, parse_val_binding_ast)
+    let (input, ast) = alt(all_parsers)(input)?;
     Ok(
         (
             input,
